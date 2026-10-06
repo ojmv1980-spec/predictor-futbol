@@ -13,7 +13,7 @@ button{font:600 14px system-ui,sans-serif;background:var(--a);color:var(--c);bor
 .w{color:var(--r);font-weight:700}summary{cursor:pointer;color:var(--a);font:600 13px system-ui,sans-serif}code{font-size:12px}
 </style></head><body><main>
 <h1>Predictor de fútbol <span id="st" class="pill"></span></h1>
-<div class="c"><b>1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk (ej. E0.csv). Puedes subir varios; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" accept=".csv" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
+<div class="c"><b>1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk, ligas principales (E0.csv) o ligas extra (ARG.csv, BRA.csv, MEX.csv: una temporada tras otra en un solo archivo). Selecciona varios a la vez; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
 <div class="c"><b>2. Partidos del día</b><p class="m">Uno por línea:<br><code>Local vs Visitante | cuota1 cuotaX cuota2 | ajuste% local visitante | nivel local visitante</code><br>Todo lo posterior al nombre es opcional. Nivel = tu valoración de plantilla y títulos, de 1 a 5. Ajuste −10 = −10% de goles esperados (bajas, clima).</p><textarea id="fx" rows="5" placeholder="Arsenal vs Chelsea | 1.95 3.6 4.1 | 0 -8"></textarea><button id="go">Analizar</button></div>
 <div id="out"></div>
 <div class="c"><b>3. Backtest</b><p class="m">Compara el modelo contra las cuotas del mercado en partidos ya jugados. Es la prueba de si hay ventaja real.</p><button id="btn" class="s">Probar modelo</button><p id="bt" class="m"></p></div>
@@ -22,8 +22,8 @@ button{font:600 14px system-ui,sans-serif;background:var(--a);color:var(--c);bor
 const $=s=>document.querySelector(s),avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 let D=[];try{D=JSON.parse(localStorage.getItem('d')||'[]')}catch(e){}
 function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(',').map(s=>s.replace(/^\uFEFF/,'').trim()),ix=n=>h.indexOf(n);
-const [iD,iH,iA,iG,iF]=['Date','HomeTeam','AwayTeam','FTHG','FTAG'].map(ix);
-const io=[['PSH','PSD','PSA'],['B365H','B365D','B365A'],['AvgH','AvgD','AvgA']].map(a=>a.map(ix)).find(a=>a.every(i=>i>=0));
+const f=(a,b)=>ix(a)>=0?ix(a):ix(b),[iD,iH,iA,iG,iF]=[ix('Date'),f('HomeTeam','Home'),f('AwayTeam','Away'),f('FTHG','HG'),f('FTAG','AG')];
+const io=[['PSH','PSD','PSA'],['PH','PD','PA'],['B365H','B365D','B365A'],['AvgH','AvgD','AvgA']].map(a=>a.map(ix)).find(a=>a.every(i=>i>=0));
 return L.slice(1).map(l=>{const c=l.split(','),[d,m,y]=(c[iD]||'').split('/');if(!c[iH]||!c[iG]||!y)return null;
 return{d:new Date(y.length==2?'20'+y:+y,m-1,+d).getTime(),h:c[iH],a:c[iA],hg:+c[iG],ag:+c[iF],o:io?io.map(i=>+c[i]):null}}).filter(x=>x&&!isNaN(x.d)&&!isNaN(x.hg))}
 function save(){D.sort((a,b)=>a.d-b.d);try{localStorage.setItem('d',JSON.stringify(D))}catch(e){}info()}
