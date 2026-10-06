@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Predictor de fútbol</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#14532d"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#eef2ec;--c:#fff;--t:#14201a;--m:#5b6b61;--a:#14532d;--g:#15803d;--r:#b91c1c;--b:#d5dfd6}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1410;--c:#151e18;--t:#e6eee8;--m:#93a69a;--a:#4ade80;--g:#4ade80;--r:#f87171;--b:#25332a}}
+*{box-sizing:border-box}html{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+body{margin:0;background:var(--bg);color:var(--t);font:15px/1.45 Georgia,'Times New Roman',serif}
+main{max-width:720px;margin:auto;padding:14px}h1{font-size:22px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center}
+.pill{font:600 12px system-ui,sans-serif;border:1px solid var(--b);border-radius:99px;padding:2px 10px;color:var(--m)}
+.c{background:var(--c);border:1px solid var(--b);border-radius:8px;padding:12px;margin-bottom:12px}.m{color:var(--m);font-size:13px}
+textarea,input[type=file]{width:100%;font:14px ui-monospace,monospace;padding:8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t)}
+button{font:600 14px system-ui,sans-serif;background:var(--a);color:var(--c);border:0;border-radius:6px;padding:10px 16px;margin:8px 8px 0 0}button.s{background:none;color:var(--a);border:1px solid var(--a)}
+.g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;text-align:center}.g div{border:1px solid var(--b);border-radius:6px;padding:6px}.g b{display:block;font-size:20px}.g small{display:block;color:var(--m)}.g .p{color:var(--g);font-weight:700}
+.w{color:var(--r);font-weight:700}summary{cursor:pointer;color:var(--a);font:600 13px system-ui,sans-serif}code{font-size:12px}
+</style></head><body><main>
+<h1>Predictor de fútbol <span id="st" class="pill"></span></h1>
+<div class="c"><b>1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk (ej. E0.csv). Puedes subir varios; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" accept=".csv" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
+<div class="c"><b>2. Partidos del día</b><p class="m">Uno por línea:<br><code>Local vs Visitante | cuota1 cuotaX cuota2 | ajuste% local visitante | nivel local visitante</code><br>Todo lo posterior al nombre es opcional. Nivel = tu valoración de plantilla y títulos, de 1 a 5. Ajuste −10 = −10% de goles esperados (bajas, clima).</p><textarea id="fx" rows="5" placeholder="Arsenal vs Chelsea | 1.95 3.6 4.1 | 0 -8"></textarea><button id="go">Analizar</button></div>
+<div id="out"></div>
+<div class="c"><b>3. Backtest</b><p class="m">Compara el modelo contra las cuotas del mercado en partidos ya jugados. Es la prueba de si hay ventaja real.</p><button id="btn" class="s">Probar modelo</button><p id="bt" class="m"></p></div>
+<p class="m">Las probabilidades son estimaciones, no certezas. Un EV positivo del modelo solo vale si el backtest lo respalda.</p>
+</main><script>
+const $=s=>document.querySelector(s),avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+let D=[];try{D=JSON.parse(localStorage.getItem('d')||'[]')}catch(e){}
+function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(',').map(s=>s.replace(/^\uFEFF/,'').trim()),ix=n=>h.indexOf(n);
+const [iD,iH,iA,iG,iF]=['Date','HomeTeam','AwayTeam','FTHG','FTAG'].map(ix);
+const io=[['PSH','PSD','PSA'],['B365H','B365D','B365A'],['AvgH','AvgD','AvgA']].map(a=>a.map(ix)).find(a=>a.every(i=>i>=0));
+return L.slice(1).map(l=>{const c=l.split(','),[d,m,y]=(c[iD]||'').split('/');if(!c[iH]||!c[iG]||!y)return null;
+return{d:new Date(y.length==2?'20'+y:+y,m-1,+d).getTime(),h:c[iH],a:c[iA],hg:+c[iG],ag:+c[iF],o:io?io.map(i=>+c[i]):null}}).filter(x=>x&&!isNaN(x.d)&&!isNaN(x.hg))}
+function save(){D.sort((a,b)=>a.d-b.d);try{localStorage.setItem('d',JSON.stringify(D))}catch(e){}info()}
+const teams=()=>[...new Set(D.flatMap(x=>[x.h,x.a]))];
+function info(){$('#info').textContent=D.length?`${D.length} partidos · ${teams().length} equipos`:'Sin datos todavía.'}
+$('#f').onchange=async e=>{const seen=new Set(D.map(x=>x.d+x.h+x.a));for(const f of e.target.files){parseCSV(await f.text()).forEach(x=>{const k=x.d+x.h+x.a;if(!seen.has(k)){seen.add(k);D.push(x)}})}save()};
+$('#clr').onclick=()=>{D=[];save()};
+const find=n=>{n=n.trim().toLowerCase();const T=teams();return T.find(t=>t.toLowerCase()==n)||T.find(t=>t.toLowerCase().includes(n)||n.includes(t.toLowerCase()))};
+function elo(S){const R={},g=t=>R[t]??1500;S.forEach(x=>{const a=g(x.h),b=g(x.a),e=1/(1+10**((b-a-60)/400)),r=x.hg>x.ag?1:x.hg==x.ag?.5:0;R[x.h]=a+20*(r-e);R[x.a]=b-20*(r-e)});return R}
+function pts(S,t,k){const s=S.filter(x=>x[k]==t);return s.length?avg(s.map(x=>{const a=k=='h'?x.hg:x.ag,b=k=='h'?x.ag:x.hg;return a>b?3:a==b?1:0})):1.4}
+function ctx(S,H,A,nv){const R=elo(S),g=t=>R[t]??1500,lg=avg(S.map(x=>x.hg>x.ag?3:x.hg==x.ag?1:0))-avg(S.map(x=>x.hg<x.ag?3:x.hg==x.ag?1:0)),
+hH=pts(S,H,'h')-pts(S,H,'a')-lg,camp=60+hH*80,gap=g(A)-g(H)+(nv[0]&&nv[1]?(nv[1]-nv[0])*40:0),net=gap-camp;
+return{hH,net,v:net>40?'A':net<-40?'B':'C',eH:g(H),eA:g(A)}}
+function pred(S,H,A,aj,nv){const L=lam(S,H,A);if(!L)return null;const c=ctx(S,H,A,nv),sh=Math.max(-.1,Math.min(.1,c.net/1500)),
+lh=L[0]*(1+aj[0]/100)*(1-sh),la=L[1]*(1+aj[1]/100)*(1+sh),P=probs(lh,la);
+if(c.v=='C'){P[1]*=1.08;const t=P[0]+P[1]+P[2];for(let i=0;i<3;i++)P[i]/=t}return{lh,la,P,c}}
+const vt={A:'A) la jerarquía del visitante anula la ventaja de campo.',B:'B) el visitante queda rezagado ante la fortaleza del local.',C:'C) choque equilibrado: el empate gana probabilidad.'};
+function lam(S,H,A){const mh=avg(S.map(x=>x.hg))||1.4,ma=avg(S.map(x=>x.ag))||1.1;
+const f=(t,k,g)=>{const s=S.filter(x=>x[k]==t);if(s.length<3)return null;return .5*avg(s.map(g))+.5*avg(s.slice(-5).map(g))};
+const ah=f(H,'h',x=>x.hg),dh=f(H,'h',x=>x.ag),aa=f(A,'a',x=>x.ag),da=f(A,'a',x=>x.hg);
+if([ah,dh,aa,da].some(v=>v===null))return null;return[ah*da/mh,aa*dh/ma]}
+const pois=(l,k)=>{let p=Math.exp(-l);for(let i=1;i<=k;i++)p*=l/i;return p};
+function probs(lh,la){let H=0,X=0,A=0,O=0,B=0;for(let i=0;i<9;i++)for(let j=0;j<9;j++){const p=pois(lh,i)*pois(la,j);i>j?H+=p:i<j?A+=p:X+=p;if(i+j>2)O+=p;if(i&&j)B+=p}const s=H+X+A;return[H/s,X/s,A/s,O,B]}
+function form(t,loc){const s=D.filter(x=>loc=='h'?x.h==t:loc=='a'?x.a==t:x.h==t||x.a==t).slice(-5);let gf=0,gc=0,cs=0,fs=0,r='';
+s.forEach(x=>{const h=x.h==t,a=h?x.hg:x.ag,b=h?x.ag:x.hg;gf+=a;gc+=b;if(!b)cs++;if(!a)fs++;r+=a>b?'V':a<b?'D':'E'});
+return`${r||'-'} · GF ${gf} GC ${gc} · valla en 0: ${cs} · sin anotar: ${fs}`}
+$('#go').onclick=()=>{const out=$('#out');out.innerHTML='';
+$('#fx').value.split('\n').filter(l=>l.trim()).forEach(l=>{const [m,o='',aj='',nv='']=l.split('|'),[a,b]=m.split(/\s+(?:vs|v|-)\s+/i),H=find(a||''),A=find(b||'');
+if(!H||!A){out.innerHTML+=`<div class="c w">No encuentro el equipo en: ${m}</div>`;return}
+const [ah=0,av=0]=aj.trim().split(/\s+/).filter(Boolean).map(Number),R=pred(D,H,A,[ah,av],nv.trim().split(/\s+/).filter(Boolean).map(Number));
+if(!R){out.innerHTML+=`<div class="c w">Pocos datos para ${H} o ${A}.</div>`;return}const {lh,la,P,c}=R;
+const od=o.trim().split(/\s+/).filter(Boolean).map(Number),ok=od.length==3&&od.every(x=>x>1),nm=['1','X','2'];
+let ev=[],trap='';if(ok){ev=P.slice(0,3).map((p,i)=>p*od[i]-1);const q=od.map(x=>1/x),s=q[0]+q[1]+q[2],f=od.indexOf(Math.min(...od));
+if(P[f]<q[f]/s-.08)trap=`<p class="w">Posible trampa: el mercado favorece a ${nm[f]} (${(q[f]/s*100).toFixed(0)}%) pero el modelo le da ${(P[f]*100).toFixed(0)}%.</p>`}
+const h2h=D.filter(x=>x.h==H&&x.a==A).slice(-3).map(x=>x.hg+'-'+x.ag).join(', ')||'sin datos';
+out.innerHTML+=`<div class="c"><b>${H} vs ${A}</b><div class="m">Goles esperados: ${lh.toFixed(2)} - ${la.toFixed(2)}</div>
+<p class="m"><b>Localía vs jerarquía:</b> ${vt[c.v]}<br>Campo de ${H}: ${c.hH>.3?'fortaleza':c.hH<-.3?'vulnerable':'normal'} (${c.hH>=0?'+':''}${c.hH.toFixed(2)} pts/partido vs la liga) · Elo local ${c.eH.toFixed(0)}, visitante ${c.eA.toFixed(0)}</p>
+<div class="g">${P.slice(0,3).map((p,i)=>`<div><small>${nm[i]}</small><b>${(p*100).toFixed(0)}%</b>${ok?`<small class="${ev[i]>.05?'p':''}">EV ${(ev[i]*100).toFixed(0)}%</small>`:''}</div>`).join('')}</div>
+<div class="m">Más de 2.5: ${(P[3]*100).toFixed(0)}% · Ambos anotan: ${(P[4]*100).toFixed(0)}%</div>${trap}
+<details><summary>Últimos 5 y cara a cara</summary><p class="m">${H} de local: ${form(H,'h')}<br>${H} en total: ${form(H,'')}<br>${A} de visita: ${form(A,'a')}<br>${A} en total: ${form(A,'')}<br>Últimos duelos (${H} de local): ${h2h}</p></details></div>`})};
+$('#btn').onclick=()=>{let n=0,k=0,lm=0,lk=0;const ll=(p,r)=>-Math.log(Math.max(p[r],1e-6));
+for(let i=Math.floor(D.length*.4);i<D.length;i++){const x=D[i],R=pred(D.slice(0,i),x.h,x.a,[0,0],[]);if(!R)continue;const P=R.P,r=x.hg>x.ag?0:x.hg==x.ag?1:2;n++;
+if(x.o&&x.o.every(v=>v>1)){const q=x.o.map(v=>1/v),s=q[0]+q[1]+q[2];lk+=ll(q.map(v=>v/s),r);lm+=ll(P,r);k++}}
+$('#bt').textContent=!n?'Faltan datos (sube al menos una temporada).':!k?`${n} partidos probados, pero el CSV no trae cuotas para comparar.`:
+`${k} partidos. Error del modelo: ${(lm/k).toFixed(3)} · del mercado: ${(lk/k).toFixed(3)} (menor es mejor). `+(lm>=lk?'El modelo no supera al mercado: no uses el EV como guía.':'El modelo supera al mercado en esta muestra; confirma con más temporadas.')};
+const up=()=>$('#st').textContent=navigator.onLine?'en línea':'sin conexión';addEventListener('online',up);addEventListener('offline',up);up();info();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
