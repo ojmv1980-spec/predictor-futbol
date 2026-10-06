@@ -7,13 +7,18 @@ body{margin:0;background:var(--bg);color:var(--t);font:15px/1.45 Georgia,'Times 
 main{max-width:720px;margin:auto;padding:14px}h1{font-size:22px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center}
 .pill{font:600 12px system-ui,sans-serif;border:1px solid var(--b);border-radius:99px;padding:2px 10px;color:var(--m)}
 .c{background:var(--c);border:1px solid var(--b);border-radius:8px;padding:12px;margin-bottom:12px}.m{color:var(--m);font-size:13px}
-textarea,input[type=file]{width:100%;font:14px ui-monospace,monospace;padding:8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t)}
+textarea,input{width:100%;font:14px ui-monospace,monospace;padding:8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t)}
 button{font:600 14px system-ui,sans-serif;background:var(--a);color:var(--c);border:0;border-radius:6px;padding:10px 16px;margin:8px 8px 0 0}button.s{background:none;color:var(--a);border:1px solid var(--a)}
 .g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;text-align:center}.g div{border:1px solid var(--b);border-radius:6px;padding:6px}.g b{display:block;font-size:20px}.g small{display:block;color:var(--m)}.g .p{color:var(--g);font-weight:700}
 .w{color:var(--r);font-weight:700}summary{cursor:pointer;color:var(--a);font:600 13px system-ui,sans-serif}code{font-size:12px}
 </style></head><body><main>
 <h1>Predictor de fútbol <span id="st" class="pill"></span></h1>
-<div class="c"><b>1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk, ligas principales (E0.csv) o ligas extra (ARG.csv, BRA.csv, MEX.csv: una temporada tras otra en un solo archivo). Selecciona varios a la vez; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
+<div class="c"><b>Analista IA</b><p class="m">Primera línea: la liga o torneo. Debajo, los partidos, uno por línea. Toca "Copiar para Claude": la app arma todas las instrucciones y tú solo las pegas en un chat nuevo de Claude (gratis, sin clave).</p>
+<textarea id="ai" rows="7" placeholder="Premier League&#10;Arsenal vs Chelsea&#10;Liverpool vs Everton"></textarea>
+<button id="cp">Copiar para Claude</button><button id="oc" class="s">Abrir Claude</button><br><button id="ia" class="s">Analizar con API (opcional)</button><button id="ik" class="s">Clave y modelo</button>
+<div id="kb" hidden><input id="key" type="password" placeholder="Clave API (sk-ant-...)" style="margin-top:8px"><input id="mdl" type="text" style="margin-top:8px"></div>
+<div id="ao" style="margin-top:12px"></div></div>
+<div class="c"><b>Modelo local (sin internet) · 1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk, ligas principales (E0.csv) o ligas extra (ARG.csv, BRA.csv, MEX.csv: una temporada tras otra en un solo archivo). Selecciona varios a la vez; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
 <div class="c"><b>2. Partidos del día</b><p class="m">Uno por línea:<br><code>Local vs Visitante | cuota1 cuotaX cuota2 | ajuste% local visitante | nivel local visitante</code><br>Todo lo posterior al nombre es opcional. Nivel = tu valoración de plantilla y títulos, de 1 a 5. Ajuste −10 = −10% de goles esperados (bajas, clima).</p><textarea id="fx" rows="5" placeholder="Arsenal vs Chelsea | 1.95 3.6 4.1 | 0 -8"></textarea><button id="go">Analizar</button></div>
 <div id="out"></div>
 <div class="c"><b>3. Backtest</b><p class="m">Compara el modelo contra las cuotas del mercado en partidos ya jugados. Es la prueba de si hay ventaja real.</p><button id="btn" class="s">Probar modelo</button><p id="bt" class="m"></p></div>
@@ -69,6 +74,43 @@ for(let i=Math.floor(D.length*.4);i<D.length;i++){const x=D[i],R=pred(D.slice(0,
 if(x.o&&x.o.every(v=>v>1)){const q=x.o.map(v=>1/v),s=q[0]+q[1]+q[2];lk+=ll(q.map(v=>v/s),r);lm+=ll(P,r);k++}}
 $('#bt').textContent=!n?'Faltan datos (sube al menos una temporada).':!k?`${n} partidos probados, pero el CSV no trae cuotas para comparar.`:
 `${k} partidos. Error del modelo: ${(lm/k).toFixed(3)} · del mercado: ${(lk/k).toFixed(3)} (menor es mejor). `+(lm>=lk?'El modelo no supera al mercado: no uses el EV como guía.':'El modelo supera al mercado en esta muestra; confirma con más temporadas.')};
+
+const SYS=()=>`Eres un analista cuantitativo de fútbol, honesto y sin ningún vínculo con casas de apuestas. Responde en español. El usuario da la liga (primera línea) y los partidos. Hoy es ${new Date().toLocaleDateString('es')}. Usa la búsqueda web para cada partido; si un dato no aparece, escribe "no encontrado" y nunca lo inventes; menciona la fuente entre paréntesis. Objetivo: filtrar el mercado y hallar apuestas de valor positivo (EV+). EV = probabilidad estimada × cuota − 1; compara con la cuota sin margen de Pinnacle cuando exista.
+Para CADA partido cubre, en este orden y de forma concisa:
+1. Últimos 5: el local solo de LOCAL; el visitante solo de VISITANTE; y ambos en cualquier condición. Goles anotados, recibidos, vallas invictas, partidos sin anotar y tendencia V/E/D.
+2. Localía vs jerarquía: ¿el estadio fortalece mucho al local o es vulnerable? Peso de plantilla, títulos y nivel reciente del visitante. Veredicto: A) la jerarquía del visitante anula la ventaja de campo, B) el visitante queda rezagado ante la fortaleza y presión del estadio, C) choque equilibrado donde el empate gana alta probabilidad.
+3. Historial directo reciente y momento actual (rachas, necesidad de puntos en la tabla).
+4. Bajas críticas por lesión o tarjetas, y el riesgo que implican para el marcador.
+5. Métricas avanzadas (FBref, Understat, WhoScored, SofaScore): xG, xGA, PPDA, tiros a puerta, posesión, goles esperados vs reales de las últimas 5-6 jornadas.
+6. Lectura sharp y RLM (Pinnacle, Betfair Exchange, OddsPortal, Action Network): % apuestas vs % dinero y movimiento inverso de línea, sobre todo en hándicap asiático. Estos datos rara vez son públicos en fútbol: si no los hallas, dilo y usa solo el movimiento de cuotas si lo encuentras.
+7. Congestión y rotación: competición continental entre semana y fatiga.
+8. Árbitro asignado: tarjetas por partido, penales, tolerancia al juego físico.
+9. Cancha y clima: pronóstico, estado del terreno, altitud y si clima o viaje afectan al visitante.
+10. Conclusión: probabilidades 1/X/2 con su cuota justa, goles esperados, marcador más probable, mejor mercado de valor con EV estimado (si hay cuota actual), confianza (baja/media/alta) y riesgo principal.
+Al final añade "ALERTAS TRAMPA DE LA JORNADA": partidos donde el público apuesta a un favorito obvio por nombre o prestigio, pero las métricas, la jerarquía, la motivación o el dinero sharp indican peligro.
+Reglas: sé directo, sin tablas; no prometas ganancias; el mercado es eficiente y el EV es una estimación incierta; si un partido ya se jugó o no existe, dilo.`;
+const md=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/^#+ (.*)$/gm,'<h4>$1</h4>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+$('#cp').onclick=async()=>{const t=$('#ai').value.trim();if(!t)return;
+const txt='Sigue estas instrucciones para analizar la liga y los partidos que aparecen al final del mensaje.\n\n'+SYS()+'\n\n--- LIGA Y PARTIDOS ---\n'+t,o=$('#ao');
+try{await navigator.clipboard.writeText(txt);o.textContent='Copiado. Toca "Abrir Claude", pega en un chat nuevo (con la búsqueda web activada) y envía.'}
+catch(e){const x=document.createElement('textarea');x.value=txt;x.rows=8;o.replaceChildren(x);x.select();}};
+$('#oc').onclick=()=>window.open('https://claude.ai/new','_blank');
+$('#ik').onclick=()=>{$('#kb').hidden=!$('#kb').hidden};
+$('#key').value=localStorage.getItem('ak')||'';$('#mdl').value=localStorage.getItem('am')||'claude-sonnet-5-5';
+$('#ao').innerHTML=md(localStorage.getItem('last')||'');
+$('#ia').onclick=async()=>{const t=$('#ai').value.trim(),k=$('#key').value.trim(),o=$('#ao');if(!t)return;
+if(!k){$('#kb').hidden=false;o.textContent='Escribe tu clave API en "Clave y modelo".';return}
+if(!navigator.onLine){o.textContent='Sin conexión: el análisis con IA necesita internet. El modelo local de abajo sigue funcionando.';return}
+localStorage.setItem('ak',k);localStorage.setItem('am',$('#mdl').value);
+const b=$('#ia');b.disabled=true;o.textContent='Analizando… puede tardar varios minutos.';let acc='';
+try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+body:JSON.stringify({model:$('#mdl').value,max_tokens:8000,stream:true,system:SYS(),tools:[{type:'web_search_20250305',name:'web_search',max_uses:20}],messages:[{role:'user',content:t}]})});
+if(!r.ok)throw new Error((await r.text()).slice(0,300));
+const rd=r.body.getReader(),dc=new TextDecoder();let buf='';
+for(;;){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
+for(const l of ls)if(l.startsWith('data: ')){try{const j=JSON.parse(l.slice(6));if(j.type=='content_block_delta'&&j.delta.type=='text_delta'){acc+=j.delta.text;o.innerHTML=md(acc)}}catch(e){}}}
+if(acc)localStorage.setItem('last',acc)}catch(e){o.innerHTML='Error: '+String(e.message).replace(/</g,'&lt;')}
+b.disabled=false};
 const up=()=>$('#st').textContent=navigator.onLine?'en línea':'sin conexión';addEventListener('online',up);addEventListener('offline',up);up();info();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 </script></body></html>
