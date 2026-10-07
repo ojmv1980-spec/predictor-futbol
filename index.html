@@ -1,116 +1,682 @@
-<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Predictor de fútbol</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#14532d"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
-<style>
-:root{--bg:#eef2ec;--c:#fff;--t:#14201a;--m:#5b6b61;--a:#14532d;--g:#15803d;--r:#b91c1c;--b:#d5dfd6}
-@media(prefers-color-scheme:dark){:root{--bg:#0d1410;--c:#151e18;--t:#e6eee8;--m:#93a69a;--a:#4ade80;--g:#4ade80;--r:#f87171;--b:#25332a}}
-*{box-sizing:border-box}html{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
-body{margin:0;background:var(--bg);color:var(--t);font:15px/1.45 Georgia,'Times New Roman',serif}
-main{max-width:720px;margin:auto;padding:14px}h1{font-size:22px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center}
-.pill{font:600 12px system-ui,sans-serif;border:1px solid var(--b);border-radius:99px;padding:2px 10px;color:var(--m)}
-.c{background:var(--c);border:1px solid var(--b);border-radius:8px;padding:12px;margin-bottom:12px}.m{color:var(--m);font-size:13px}
-textarea,input{width:100%;font:14px ui-monospace,monospace;padding:8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t)}
-button{font:600 14px system-ui,sans-serif;background:var(--a);color:var(--c);border:0;border-radius:6px;padding:10px 16px;margin:8px 8px 0 0}button.s{background:none;color:var(--a);border:1px solid var(--a)}
-.g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;text-align:center}.g div{border:1px solid var(--b);border-radius:6px;padding:6px}.g b{display:block;font-size:20px}.g small{display:block;color:var(--m)}.g .p{color:var(--g);font-weight:700}
-.w{color:var(--r);font-weight:700}summary{cursor:pointer;color:var(--a);font:600 13px system-ui,sans-serif}code{font-size:12px}
-</style></head><body><main>
-<h1>Predictor de fútbol <span id="st" class="pill"></span></h1>
-<div class="c"><b>Analista IA</b><p class="m">Primera línea: la liga o torneo. Debajo, los partidos, uno por línea. Toca "Copiar para Claude": la app arma todas las instrucciones y tú solo las pegas en un chat nuevo de Claude (gratis, sin clave).</p>
-<textarea id="ai" rows="7" placeholder="Premier League&#10;Arsenal vs Chelsea&#10;Liverpool vs Everton"></textarea>
-<button id="cp">Copiar para Claude</button><button id="oc" class="s">Abrir Claude</button><br><button id="ia" class="s">Analizar con API (opcional)</button><button id="ik" class="s">Clave y modelo</button>
-<div id="kb" hidden><input id="key" type="password" placeholder="Clave API (sk-ant-...)" style="margin-top:8px"><input id="mdl" type="text" style="margin-top:8px"></div>
-<div id="ao" style="margin-top:12px"></div></div>
-<div class="c"><b>Modelo local (sin internet) · 1. Datos históricos</b><p class="m">Sube CSV de football-data.co.uk, ligas principales (E0.csv) o ligas extra (ARG.csv, BRA.csv, MEX.csv: una temporada tras otra en un solo archivo). Selecciona varios a la vez; quedan guardados en este dispositivo y funcionan sin internet.</p><input type="file" id="f" multiple><p id="info" class="m"></p><button id="clr" class="s">Borrar datos</button></div>
-<div class="c"><b>2. Partidos del día</b><p class="m">Uno por línea:<br><code>Local vs Visitante | cuota1 cuotaX cuota2 | ajuste% local visitante | nivel local visitante</code><br>Todo lo posterior al nombre es opcional. Nivel = tu valoración de plantilla y títulos, de 1 a 5. Ajuste −10 = −10% de goles esperados (bajas, clima).</p><textarea id="fx" rows="5" placeholder="Arsenal vs Chelsea | 1.95 3.6 4.1 | 0 -8"></textarea><button id="go">Analizar</button></div>
-<div id="out"></div>
-<div class="c"><b>3. Backtest</b><p class="m">Compara el modelo contra las cuotas del mercado en partidos ya jugados. Es la prueba de si hay ventaja real.</p><button id="btn" class="s">Probar modelo</button><p id="bt" class="m"></p></div>
-<p class="m">Las probabilidades son estimaciones, no certezas. Un EV positivo del modelo solo vale si el backtest lo respalda.</p>
-</main><script>
-const $=s=>document.querySelector(s),avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
-let D=[];try{D=JSON.parse(localStorage.getItem('d')||'[]')}catch(e){}
-function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(',').map(s=>s.replace(/^\uFEFF/,'').trim()),ix=n=>h.indexOf(n);
-const f=(a,b)=>ix(a)>=0?ix(a):ix(b),[iD,iH,iA,iG,iF]=[ix('Date'),f('HomeTeam','Home'),f('AwayTeam','Away'),f('FTHG','HG'),f('FTAG','AG')];
-const io=[['PSH','PSD','PSA'],['PH','PD','PA'],['B365H','B365D','B365A'],['AvgH','AvgD','AvgA']].map(a=>a.map(ix)).find(a=>a.every(i=>i>=0));
-return L.slice(1).map(l=>{const c=l.split(','),[d,m,y]=(c[iD]||'').split('/');if(!c[iH]||!c[iG]||!y)return null;
-return{d:new Date(y.length==2?'20'+y:+y,m-1,+d).getTime(),h:c[iH],a:c[iA],hg:+c[iG],ag:+c[iF],o:io?io.map(i=>+c[i]):null}}).filter(x=>x&&!isNaN(x.d)&&!isNaN(x.hg))}
-function save(){D.sort((a,b)=>a.d-b.d);try{localStorage.setItem('d',JSON.stringify(D))}catch(e){}info()}
-const teams=()=>[...new Set(D.flatMap(x=>[x.h,x.a]))];
-function info(){$('#info').textContent=D.length?`${D.length} partidos · ${teams().length} equipos`:'Sin datos todavía.'}
-$('#f').onchange=async e=>{const seen=new Set(D.map(x=>x.d+x.h+x.a));for(const f of e.target.files){parseCSV(await f.text()).forEach(x=>{const k=x.d+x.h+x.a;if(!seen.has(k)){seen.add(k);D.push(x)}})}save()};
-$('#clr').onclick=()=>{D=[];save()};
-const find=n=>{n=n.trim().toLowerCase();const T=teams();return T.find(t=>t.toLowerCase()==n)||T.find(t=>t.toLowerCase().includes(n)||n.includes(t.toLowerCase()))};
-function elo(S){const R={},g=t=>R[t]??1500;S.forEach(x=>{const a=g(x.h),b=g(x.a),e=1/(1+10**((b-a-60)/400)),r=x.hg>x.ag?1:x.hg==x.ag?.5:0;R[x.h]=a+20*(r-e);R[x.a]=b-20*(r-e)});return R}
-function pts(S,t,k){const s=S.filter(x=>x[k]==t);return s.length?avg(s.map(x=>{const a=k=='h'?x.hg:x.ag,b=k=='h'?x.ag:x.hg;return a>b?3:a==b?1:0})):1.4}
-function ctx(S,H,A,nv){const R=elo(S),g=t=>R[t]??1500,lg=avg(S.map(x=>x.hg>x.ag?3:x.hg==x.ag?1:0))-avg(S.map(x=>x.hg<x.ag?3:x.hg==x.ag?1:0)),
-hH=pts(S,H,'h')-pts(S,H,'a')-lg,camp=60+hH*80,gap=g(A)-g(H)+(nv[0]&&nv[1]?(nv[1]-nv[0])*40:0),net=gap-camp;
-return{hH,net,v:net>40?'A':net<-40?'B':'C',eH:g(H),eA:g(A)}}
-function pred(S,H,A,aj,nv){const L=lam(S,H,A);if(!L)return null;const c=ctx(S,H,A,nv),sh=Math.max(-.1,Math.min(.1,c.net/1500)),
-lh=L[0]*(1+aj[0]/100)*(1-sh),la=L[1]*(1+aj[1]/100)*(1+sh),P=probs(lh,la);
-if(c.v=='C'){P[1]*=1.08;const t=P[0]+P[1]+P[2];for(let i=0;i<3;i++)P[i]/=t}return{lh,la,P,c}}
-const vt={A:'A) la jerarquía del visitante anula la ventaja de campo.',B:'B) el visitante queda rezagado ante la fortaleza del local.',C:'C) choque equilibrado: el empate gana probabilidad.'};
-function lam(S,H,A){const mh=avg(S.map(x=>x.hg))||1.4,ma=avg(S.map(x=>x.ag))||1.1;
-const f=(t,k,g)=>{const s=S.filter(x=>x[k]==t);if(s.length<3)return null;return .5*avg(s.map(g))+.5*avg(s.slice(-5).map(g))};
-const ah=f(H,'h',x=>x.hg),dh=f(H,'h',x=>x.ag),aa=f(A,'a',x=>x.ag),da=f(A,'a',x=>x.hg);
-if([ah,dh,aa,da].some(v=>v===null))return null;return[ah*da/mh,aa*dh/ma]}
-const pois=(l,k)=>{let p=Math.exp(-l);for(let i=1;i<=k;i++)p*=l/i;return p};
-function probs(lh,la){let H=0,X=0,A=0,O=0,B=0;for(let i=0;i<9;i++)for(let j=0;j<9;j++){const p=pois(lh,i)*pois(la,j);i>j?H+=p:i<j?A+=p:X+=p;if(i+j>2)O+=p;if(i&&j)B+=p}const s=H+X+A;return[H/s,X/s,A/s,O,B]}
-function form(t,loc){const s=D.filter(x=>loc=='h'?x.h==t:loc=='a'?x.a==t:x.h==t||x.a==t).slice(-5);let gf=0,gc=0,cs=0,fs=0,r='';
-s.forEach(x=>{const h=x.h==t,a=h?x.hg:x.ag,b=h?x.ag:x.hg;gf+=a;gc+=b;if(!b)cs++;if(!a)fs++;r+=a>b?'V':a<b?'D':'E'});
-return`${r||'-'} · GF ${gf} GC ${gc} · valla en 0: ${cs} · sin anotar: ${fs}`}
-$('#go').onclick=()=>{const out=$('#out');out.innerHTML='';
-$('#fx').value.split('\n').filter(l=>l.trim()).forEach(l=>{const [m,o='',aj='',nv='']=l.split('|'),[a,b]=m.split(/\s+(?:vs|v|-)\s+/i),H=find(a||''),A=find(b||'');
-if(!H||!A){out.innerHTML+=`<div class="c w">No encuentro el equipo en: ${m}</div>`;return}
-const [ah=0,av=0]=aj.trim().split(/\s+/).filter(Boolean).map(Number),R=pred(D,H,A,[ah,av],nv.trim().split(/\s+/).filter(Boolean).map(Number));
-if(!R){out.innerHTML+=`<div class="c w">Pocos datos para ${H} o ${A}.</div>`;return}const {lh,la,P,c}=R;
-const od=o.trim().split(/\s+/).filter(Boolean).map(Number),ok=od.length==3&&od.every(x=>x>1),nm=['1','X','2'];
-let ev=[],trap='';if(ok){ev=P.slice(0,3).map((p,i)=>p*od[i]-1);const q=od.map(x=>1/x),s=q[0]+q[1]+q[2],f=od.indexOf(Math.min(...od));
-if(P[f]<q[f]/s-.08)trap=`<p class="w">Posible trampa: el mercado favorece a ${nm[f]} (${(q[f]/s*100).toFixed(0)}%) pero el modelo le da ${(P[f]*100).toFixed(0)}%.</p>`}
-const h2h=D.filter(x=>x.h==H&&x.a==A).slice(-3).map(x=>x.hg+'-'+x.ag).join(', ')||'sin datos';
-out.innerHTML+=`<div class="c"><b>${H} vs ${A}</b><div class="m">Goles esperados: ${lh.toFixed(2)} - ${la.toFixed(2)}</div>
-<p class="m"><b>Localía vs jerarquía:</b> ${vt[c.v]}<br>Campo de ${H}: ${c.hH>.3?'fortaleza':c.hH<-.3?'vulnerable':'normal'} (${c.hH>=0?'+':''}${c.hH.toFixed(2)} pts/partido vs la liga) · Elo local ${c.eH.toFixed(0)}, visitante ${c.eA.toFixed(0)}</p>
-<div class="g">${P.slice(0,3).map((p,i)=>`<div><small>${nm[i]}</small><b>${(p*100).toFixed(0)}%</b>${ok?`<small class="${ev[i]>.05?'p':''}">EV ${(ev[i]*100).toFixed(0)}%</small>`:''}</div>`).join('')}</div>
-<div class="m">Más de 2.5: ${(P[3]*100).toFixed(0)}% · Ambos anotan: ${(P[4]*100).toFixed(0)}%</div>${trap}
-<details><summary>Últimos 5 y cara a cara</summary><p class="m">${H} de local: ${form(H,'h')}<br>${H} en total: ${form(H,'')}<br>${A} de visita: ${form(A,'a')}<br>${A} en total: ${form(A,'')}<br>Últimos duelos (${H} de local): ${h2h}</p></details></div>`})};
-$('#btn').onclick=()=>{let n=0,k=0,lm=0,lk=0;const ll=(p,r)=>-Math.log(Math.max(p[r],1e-6));
-for(let i=Math.floor(D.length*.4);i<D.length;i++){const x=D[i],R=pred(D.slice(0,i),x.h,x.a,[0,0],[]);if(!R)continue;const P=R.P,r=x.hg>x.ag?0:x.hg==x.ag?1:2;n++;
-if(x.o&&x.o.every(v=>v>1)){const q=x.o.map(v=>1/v),s=q[0]+q[1]+q[2];lk+=ll(q.map(v=>v/s),r);lm+=ll(P,r);k++}}
-$('#bt').textContent=!n?'Faltan datos (sube al menos una temporada).':!k?`${n} partidos probados, pero el CSV no trae cuotas para comparar.`:
-`${k} partidos. Error del modelo: ${(lm/k).toFixed(3)} · del mercado: ${(lk/k).toFixed(3)} (menor es mejor). `+(lm>=lk?'El modelo no supera al mercado: no uses el EV como guía.':'El modelo supera al mercado en esta muestra; confirma con más temporadas.')};
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quant Pipeline | EV+ & Kelly Engine</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-card: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #10b981;
+            --accent-hover: #059669;
+            --border: #334155;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
 
-const SYS=()=>`Eres un analista cuantitativo de fútbol, honesto y sin ningún vínculo con casas de apuestas. Responde en español. El usuario da la liga (primera línea) y los partidos. Hoy es ${new Date().toLocaleDateString('es')}. Usa la búsqueda web para cada partido; si un dato no aparece, escribe "no encontrado" y nunca lo inventes; menciona la fuente entre paréntesis. Objetivo: filtrar el mercado y hallar apuestas de valor positivo (EV+). EV = probabilidad estimada × cuota − 1; compara con la cuota sin margen de Pinnacle cuando exista.
-Para CADA partido cubre, en este orden y de forma concisa:
-1. Últimos 5: el local solo de LOCAL; el visitante solo de VISITANTE; y ambos en cualquier condición. Goles anotados, recibidos, vallas invictas, partidos sin anotar y tendencia V/E/D.
-2. Localía vs jerarquía: ¿el estadio fortalece mucho al local o es vulnerable? Peso de plantilla, títulos y nivel reciente del visitante. Veredicto: A) la jerarquía del visitante anula la ventaja de campo, B) el visitante queda rezagado ante la fortaleza y presión del estadio, C) choque equilibrado donde el empate gana alta probabilidad.
-3. Historial directo reciente y momento actual (rachas, necesidad de puntos en la tabla).
-4. Bajas críticas por lesión o tarjetas, y el riesgo que implican para el marcador.
-5. Métricas avanzadas (FBref, Understat, WhoScored, SofaScore): xG, xGA, PPDA, tiros a puerta, posesión, goles esperados vs reales de las últimas 5-6 jornadas.
-6. Lectura sharp y RLM (Pinnacle, Betfair Exchange, OddsPortal, Action Network): % apuestas vs % dinero y movimiento inverso de línea, sobre todo en hándicap asiático. Estos datos rara vez son públicos en fútbol: si no los hallas, dilo y usa solo el movimiento de cuotas si lo encuentras.
-7. Congestión y rotación: competición continental entre semana y fatiga.
-8. Árbitro asignado: tarjetas por partido, penales, tolerancia al juego físico.
-9. Cancha y clima: pronóstico, estado del terreno, altitud y si clima o viaje afectan al visitante.
-10. Conclusión: probabilidades 1/X/2 con su cuota justa, goles esperados, marcador más probable, mejor mercado de valor con EV estimado (si hay cuota actual), confianza (baja/media/alta) y riesgo principal.
-Al final añade "ALERTAS TRAMPA DE LA JORNADA": partidos donde el público apuesta a un favorito obvio por nombre o prestigio, pero las métricas, la jerarquía, la motivación o el dinero sharp indican peligro.
-Reglas: sé directo, sin tablas; no prometas ganancias; el mercado es eficiente y el EV es una estimación incierta; si un partido ya se jugó o no existe, dilo.`;
-const md=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/^#+ (.*)$/gm,'<h4>$1</h4>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
-$('#cp').onclick=async()=>{const t=$('#ai').value.trim();if(!t)return;
-const txt='Sigue estas instrucciones para analizar la liga y los partidos que aparecen al final del mensaje.\n\n'+SYS()+'\n\n--- LIGA Y PARTIDOS ---\n'+t,o=$('#ao');
-try{await navigator.clipboard.writeText(txt);o.textContent='Copiado. Toca "Abrir Claude", pega en un chat nuevo (con la búsqueda web activada) y envía.'}
-catch(e){const x=document.createElement('textarea');x.value=txt;x.rows=8;o.replaceChildren(x);x.select();}};
-$('#oc').onclick=()=>window.open('https://claude.ai/new','_blank');
-$('#ik').onclick=()=>{$('#kb').hidden=!$('#kb').hidden};
-$('#key').value=localStorage.getItem('ak')||'';$('#mdl').value=localStorage.getItem('am')||'claude-sonnet-5-5';
-$('#ao').innerHTML=md(localStorage.getItem('last')||'');
-$('#ia').onclick=async()=>{const t=$('#ai').value.trim(),k=$('#key').value.trim(),o=$('#ao');if(!t)return;
-if(!k){$('#kb').hidden=false;o.textContent='Escribe tu clave API en "Clave y modelo".';return}
-if(!navigator.onLine){o.textContent='Sin conexión: el análisis con IA necesita internet. El modelo local de abajo sigue funcionando.';return}
-localStorage.setItem('ak',k);localStorage.setItem('am',$('#mdl').value);
-const b=$('#ia');b.disabled=true;o.textContent='Analizando… puede tardar varios minutos.';let acc='';
-try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-body:JSON.stringify({model:$('#mdl').value,max_tokens:8000,stream:true,system:SYS(),tools:[{type:'web_search_20250305',name:'web_search',max_uses:20}],messages:[{role:'user',content:t}]})});
-if(!r.ok)throw new Error((await r.text()).slice(0,300));
-const rd=r.body.getReader(),dc=new TextDecoder();let buf='';
-for(;;){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
-for(const l of ls)if(l.startsWith('data: ')){try{const j=JSON.parse(l.slice(6));if(j.type=='content_block_delta'&&j.delta.type=='text_delta'){acc+=j.delta.text;o.innerHTML=md(acc)}}catch(e){}}}
-if(acc)localStorage.setItem('last',acc)}catch(e){o.innerHTML='Error: '+String(e.message).replace(/</g,'&lt;')}
-b.disabled=false};
-const up=()=>$('#st').textContent=navigator.onLine?'en línea':'sin conexión';addEventListener('online',up);addEventListener('offline',up);up();info();
-if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
-</script></body></html>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            line-height: 1.6;
+            padding: 16px;
+            min-height: 100vh;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        header {
+            text-align: center;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 16px;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            color: var(--accent);
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        header p { color: var(--text-muted); font-size: 0.85rem; }
+
+        .pipeline-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        @media (min-width: 900px) {
+            .pipeline-grid { grid-template-columns: 1fr 1fr; }
+            header h1 { font-size: 2rem; }
+        }
+
+        .step-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 900px) { .step-card { padding: 24px; } }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .step-number {
+            background-color: var(--accent);
+            color: var(--bg-primary);
+            font-weight: bold;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        .step-title { font-size: 1rem; font-weight: 600; }
+        @media (min-width: 900px) { .step-title { font-size: 1.2rem; } }
+
+        .step-description {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin-bottom: 12px;
+        }
+
+        @media (min-width: 900px) {
+            .step-description { font-size: 0.85rem; margin-bottom: 16px; }
+        }
+
+        /* --- ZONA DE IMAGEN / OCR --- */
+        .ocr-section {
+            margin-bottom: 12px;
+        }
+
+        .ocr-section label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.3s, background-color 0.3s;
+            position: relative;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent);
+            background-color: rgba(16, 185, 129, 0.05);
+        }
+
+        .drop-zone p {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin: 4px 0;
+        }
+
+        .drop-zone .icon {
+            font-size: 1.8rem;
+            margin-bottom: 4px;
+        }
+
+        .drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .ocr-preview {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 4px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .ocr-progress-container {
+            display: none;
+            margin-top: 8px;
+        }
+
+        .ocr-progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .ocr-progress-fill {
+            height: 100%;
+            background-color: var(--accent);
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 3px;
+        }
+
+        .ocr-status {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .ocr-actions {
+            display: none;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .ocr-actions button {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 40px;
+        }
+
+        .btn-ocr-inject {
+            background-color: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .btn-ocr-clear {
+            background-color: var(--border);
+            color: var(--text-main);
+        }
+
+        .ocr-divider {
+            display: flex;
+            align-items: center;
+            margin: 12px 0;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .ocr-divider::before, .ocr-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background-color: var(--border);
+        }
+
+        .ocr-divider span { padding: 0 10px; }
+
+        /* --- TEXTAREA --- */
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;
+            resize: vertical;
+            margin-bottom: 12px;
+            transition: border-color 0.2s;
+        }
+
+        @media (min-width: 900px) {
+            textarea { min-height: 250px; padding: 12px; margin-bottom: 16px; }
+        }
+
+        textarea:focus { outline: none; border-color: var(--accent); }
+
+        .btn {
+            background-color: var(--accent);
+            color: var(--bg-primary);
+            border: none;
+            padding: 14px 20px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            width: 100%;
+            min-height: 48px;
+            touch-action: manipulation;
+        }
+
+        .btn:hover { background-color: var(--accent-hover); }
+        .btn:active { transform: scale(0.98); }
+        .btn.copied { background-color: #064e3b; color: #a7f3d0; }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            border-top: 1px solid var(--border);
+            padding-top: 16px;
+        }
+
+        @media (min-width: 900px) {
+            .footer { margin-top: 40px; font-size: 0.8rem; padding-top: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>QUANT PIPELINE // EV+ ENGINE</h1>
+        <p>Sistema de Análisis Cuantitativo de Dos Pasos | Ejecución 100% Local</p>
+    </header>
+
+    <div class="pipeline-grid">
+
+        <!-- PASO 1 -->
+        <div class="step-card">
+            <div class="step-header">
+                <div class="step-number">1</div>
+                <div class="step-title">Inyector de Datos (Prompt 1)</div>
+            </div>
+            <p class="step-description">Pega la lista de partidos como texto, o pega/sube una captura de pantalla. El OCR extraerá el texto automáticamente.</p>
+
+            <!-- ZONA OCR -->
+            <div class="ocr-section">
+                <label>📷 Captura de pantalla (OCR local)</label>
+                <div class="drop-zone" id="drop-zone">
+                    <div class="icon">📋</div>
+                    <p><strong>Pega aquí</strong> (Ctrl+V) o haz clic para subir</p>
+                    <p>Soporta: PNG, JPG, WEBP</p>
+                    <input type="file" id="file-input" accept="image/*">
+                </div>
+                <img id="ocr-preview" class="ocr-preview" alt="Preview">
+                <div class="ocr-progress-container" id="ocr-progress-container">
+                    <div class="ocr-progress-bar">
+                        <div class="ocr-progress-fill" id="ocr-progress-fill"></div>
+                    </div>
+                    <p class="ocr-status" id="ocr-status">Inicializando motor OCR...</p>
+                </div>
+                <div class="ocr-actions" id="ocr-actions">
+                    <button class="btn-ocr-inject" onclick="injectOcrText()">✅ Inyectar texto al textarea</button>
+                    <button class="btn-ocr-clear" onclick="clearOcr()">🗑️ Limpiar</button>
+                </div>
+            </div>
+
+            <div class="ocr-divider"><span>O escribe manualmente</span></div>
+
+            <textarea id="input-matches" placeholder="Ej: Japón: Copa del Emperador&#10;1. Urawa Reds vs Omiya Ardija&#10;2. Avispa Fukuoka vs Yokohama FC..."></textarea>
+            <button class="btn" id="btn-copy-prompt1" onclick="generateAndCopy('prompt1')">Generar y Copiar Prompt 1</button>
+        </div>
+
+        <!-- PASO 2 -->
+        <div class="step-card">
+            <div class="step-header">
+                <div class="step-number">2</div>
+                <div class="step-title">Motor de Refinamiento (Super Prompt 2)</div>
+            </div>
+            <p class="step-description">Pega aquí la respuesta cruda que te dio la IA en el Paso 1. El sistema generará y copiará el Super Prompt para calcular EV+ y Kelly.</p>
+            <textarea id="input-ai-output" placeholder="Pega aquí toda la salida generada por el Prompt 1..."></textarea>
+            <button class="btn" id="btn-copy-prompt2" onclick="generateAndCopy('prompt2')">Generar y Copiar Super Prompt 2</button>
+        </div>
+
+    </div>
+
+    <div class="footer">
+        <p>Desarrollado para análisis de Valor Esperado (EV+) y Criterio de Kelly Fraccional.</p>
+        <p>Los datos no salen de tu navegador. OCR procesado localmente con Tesseract.js.</p>
+    </div>
+</div>
+
+<script>
+    // =============================================
+    // PLANTILLAS DE LOS PROMPTS MAESTROS
+    // =============================================
+
+    const PROMPT_1_TEMPLATE = `Actúa como un analista cuantitativo de fútbol profesional, honesto y sin vínculos con casas de apuestas. Tu objetivo es recopilar datos estructurados y rigurosos para un análisis de Valor Esperado (EV+). Hoy es la fecha actual. 
+
+Instrucciones de Entrada:
+Analiza el siguiente bloque de partidos: 
+{{MATCH_DATA}}
+
+Reglas de Oro:
+1. NUNCA inventes datos. Si algo no se encuentra tras la búsqueda, escribe exactamente "[DATO_NO_ENCONTRADO]". Cita la fuente entre paréntesis.
+2. Sé conciso, directo y usa el formato solicitado. Sin tablas, sin relleno.
+
+Para CADA partido, ejecuta este protocolo de 10 puntos en orden:
+
+1. Últimos 5: Local (solo en casa), Visitante (solo fuera) y Global. Goles a favor/en contra, vallas invictas, partidos sin anotar, tendencia V/E/D.
+2. Localía vs Jerarquía: Veredicto obligatorio: A) La jerarquía del visitante anula la ventaja, B) El visitante queda rezagado ante la fortaleza del estadio, C) Choque equilibrado (alta probabilidad de empate).
+3. Historial directo (H2H) reciente y momento actual (rachas, necesidad de puntos).
+4. Bajas críticas: Lesiones o sanciones confirmadas de jugadores clave y su impacto en el marcador.
+5. Métricas Avanzadas (Protocolo de Búsqueda en Cascada): Busca secuencialmente en este orden hasta encontrar cifras: 
+   - Intento 1: FBref / Understat (xG, xGA, PPDA).
+   - Intento 2: Sofascore / FootyStats (Tiros a puerta, posesión en tercio final, xG promedio).
+   - Intento 3: Promedio del equipo en la liga actual si no hay dato del partido.
+   - Formato de salida obligatorio: "xG: [valor] | xGA: [valor] | PPDA: [valor] | [FUENTE]". Si tras los 3 intentos no hay dato, pon "[DATO_NO_PUBLICADO_EN_FUENTES_ABIERTAS]".
+6. Lectura de Mercado (Sharp): Busca en OddsPortal, BetExplorer o Flashscore la línea de Pinnacle o el promedio de casas sharp (Pinnacle, Betfair, SBOBet). Formato: "Cuota Apertura: [X.XX] | Cuota Actual: [X.XX] | Movimiento: [Sube/Baja/Estable]". Si no se encuentra, deja "[ESPERANDO_INPUT_MANUAL_DE_CUOTA]".
+7. Congestión y Rotación: Competición continental reciente, días de descanso, fatiga de viaje.
+8. Árbitro: Nombre (si se encuentra), promedio de tarjetas/partido y penales.
+9. Cancha y Clima: Estado del terreno, pronóstico de lluvia/viento, altitud.
+10. Conclusión Preliminar: Probabilidades 1/X/2 estimadas, goles esperados, marcador más probable, y el mercado de valor principal a evaluar en el Paso 2.
+
+AL FINAL DEL REPORTE, añade:
+"ALERTAS TRAMPA DE LA JORNADA": Partidos donde el público apuesta al favorito por nombre, pero el contexto (rotación, derbi, fatiga) indica alto riesgo de no cubrir el hándicap o de empate.`;
+
+    const PROMPT_2_TEMPLATE = `Actúa como el Motor Cuantitativo de un syndicate de apuestas profesional. Recibirás el informe de datos brutos de un analista. Tu única tarea es procesar esos datos para calcular el Valor Esperado (EV+) real, ajustar probabilidades y determinar el tamaño de la apuesta.
+
+Reglas de Procesamiento:
+1. No busques datos nuevos. Usa EXCLUSIVAMENTE la información proporcionada en el texto que te voy a pegar a continuación.
+2. Si falta la cuota de mercado (aparece [ESPERANDO_INPUT_MANUAL_DE_CUOTA]), usa un valor hipotético realista de Pinnacle para el mercado sugerido y acláralo como "[CUOTA_ESTIMADA_PARA_MODELO]".
+3. Aplica rigor matemático. Muestra los cálculos brevemente.
+
+Para CADA partido del informe, genera esta salida estructurada:
+
+📊 [NOMBRE DEL PARTIDO]
+1. Ajuste Bayesiano de Probabilidad:
+   - Probabilidad Base (del informe): [X]%
+   - Ajustes aplicados: (Ej: "-5% por factor derbi", "-8% por fatiga de viaje y rotación confirmada", "+3% por xG superior al promedio").
+   - Probabilidad Ajustada Final (Nuestra): [Y]%
+
+2. Cálculo de Valor (EV+):
+   - Cuota de Mercado (Sharp/Pinnacle): [Z.ZZ]
+   - Cuota Justa (Fair Odds = 1 / Probabilidad Ajustada): [W.WW]
+   - Fórmula EV: (Probabilidad Ajustada × Cuota de Mercado) - 1
+   - Resultado EV: [X.XX]% (Solo considera EV+ si es > 3%)
+
+3. Gestión de Bankroll (Criterio de Kelly Fraccional):
+   - Fórmula Kelly: ((Probabilidad × Cuota) - 1) / (Cuota - 1)
+   - Kelly Completo: [X.XX]%
+   - Recomendación Real (1/4 de Kelly): [Y.YY]% del bankroll. (Si el EV es < 3% o negativo, recomienda "NO APOSTAR / 0%").
+
+4. Veredicto Final del Mercado:
+   - Mejor Mercado: (Ej: Visitante Hándicap +1.5, Under 2.5, etc.)
+   - Confianza del Modelo: [Baja / Media / Alta]
+   - Semáforo de Riesgo: 🟢 (Sólido), 🟡 (Requiere monitoreo de alineaciones), 🔴 (Trampa potencial, evitar).
+
+---
+INICIO DEL INFORME A PROCESAR:
+{{AI_OUTPUT}}`;
+
+    // =============================================
+    // LÓGICA DE COPIADO DE PROMPTS
+    // =============================================
+
+    function generateAndCopy(step) {
+        let template, inputId, btnId;
+
+        if (step === 'prompt1') {
+            template = PROMPT_1_TEMPLATE;
+            inputId = 'input-matches';
+            btnId = 'btn-copy-prompt1';
+        } else {
+            template = PROMPT_2_TEMPLATE;
+            inputId = 'input-ai-output';
+            btnId = 'btn-copy-prompt2';
+        }
+
+        const userInput = document.getElementById(inputId).value.trim();
+
+        if (!userInput) {
+            alert("Por favor, ingresa texto en la caja correspondiente antes de generar el prompt.");
+            return;
+        }
+
+        const placeholder = step === 'prompt1' ? '{{MATCH_DATA}}' : '{{AI_OUTPUT}}';
+        const finalPrompt = template.replace(placeholder, userInput);
+
+        navigator.clipboard.writeText(finalPrompt).then(() => {
+            const btn = document.getElementById(btnId);
+            const originalText = btn.innerText;
+            btn.innerText = "✅ ¡Copiado! Pega en Qwen";
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.remove('copied');
+            }, 3000);
+        }).catch(err => {
+            console.error('Error al copiar: ', err);
+            alert("Error al copiar. Selecciona y copia manualmente.");
+        });
+    }
+
+    // =============================================
+    // LÓGICA DE OCR (TESSERACT.JS)
+    // =============================================
+
+    let ocrExtractedText = '';
+    let worker = null;
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const preview = document.getElementById('ocr-preview');
+    const progressContainer = document.getElementById('ocr-progress-container');
+    const progressFill = document.getElementById('ocr-progress-fill');
+    const statusText = document.getElementById('ocr-status');
+    const ocrActions = document.getElementById('ocr-actions');
+
+    // Preprocesar imagen para fondos oscuros (Flashscore, etc.)
+    function preprocessImage(imgElement) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = imgElement.naturalWidth || imgElement.width;
+        canvas.height = imgElement.naturalHeight || imgElement.height;
+
+        ctx.drawImage(imgElement, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            // Invertir colores
+            data[i] = 255 - data[i];         // R
+            data[i + 1] = 255 - data[i + 1]; // G
+            data[i + 2] = 255 - data[i + 2]; // B
+
+            // Aumentar contraste
+            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            const factor = 1.5;
+            data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
+            data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
+            data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        return canvas.toDataURL();
+    }
+
+    async function runOCR(imageSource) {
+        progressContainer.style.display = 'block';
+        ocrActions.style.display = 'none';
+        progressFill.style.width = '0%';
+        statusText.textContent = 'Inicializando motor OCR...';
+
+        try {
+            if (!worker) {
+                worker = await Tesseract.createWorker('eng+spa', 1, {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            const pct = Math.round(m.progress * 100);
+                            progressFill.style.width = pct + '%';
+                            statusText.textContent = `Reconociendo texto... ${pct}%`;
+                        } else {
+                            statusText.textContent = m.status;
+                        }
+                    }
+                });
+            }
+
+                // Preprocesar imagen para fondos oscuros (Flashscore, etc.)
+    function preprocessImage(imgElement) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = imgElement.naturalWidth || imgElement.width;
+        canvas.height = imgElement.naturalHeight || imgElement.height;
+
+        ctx.drawImage(imgElement, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            // Invertir colores
+            data[i] = 255 - data[i];         // R
+            data[i + 1] = 255 - data[i + 1]; // G
+            data[i + 2] = 255 - data[i + 2]; // B
+
+            // Aumentar contraste
+            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            const factor = 1.5;
+            data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
+            data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
+            data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        return canvas.toDataURL();
+    }
+
+    async function runOCR(imageSource) {
+        progressContainer.style.display = 'block';
+        ocrActions.style.display = 'none';
+        progressFill.style.width = '0%';
+        statusText.textContent = 'Inicializando motor OCR...';
+
+        try {
+            if (!worker) {
+                worker = await Tesseract.createWorker('eng+spa', 1, {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            const pct = Math.round(m.progress * 100);
+                            progressFill.style.width = pct + '%';
+                            statusText.textContent = `Reconociendo texto... ${pct}%`;
+                        } else {
+                            statusText.textContent = m.status;
+                        }
+                    }
+                });
+            }
+
+            // Preprocesar la imagen
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = imageSource;
+            });
+
+            const processedDataUrl = preprocessImage(img);
+
+            const { data: { text } } = await worker.recognize(processedDataUrl);
+
+            ocrExtractedText = text
+                .replace(/\n{3,}/g, '\n\n')
+                .replace(/[^\S\n]+/g, ' ')
+                .trim();
+
+            statusText.textContent = `✅ OCR completado. ${ocrExtractedText.split('\n').length} líneas extraídas.`;
+            progressFill.style.width = '100%';
+            ocrActions.style.display = 'flex';
+
+        } catch (err) {
+            console.error('Error OCR:', err);
+            statusText.textContent = '❌ Error en el OCR. Intenta con otra imagen.';
+        }
+    }
+
+    function handleImage(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            preview.src = e.target.result;
+            preview.style.display = 'block';
+            runOCR(e.target.result);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // Subir archivo
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) handleImage(e.target.files[0]);
+    });
+
+    // Pegar imagen (Ctrl+V)
+    document.addEventListener('paste', (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                handleImage(file);
+                return;
+            }
+        }
+    });
+
+    // Drag & Drop
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files[0]) handleImage(e.dataTransfer.files[0]);
+    });
+
+    // Inyectar texto OCR al textarea
+    function injectOcrText() {
+        const textarea = document.getElementById('input-matches');
+        const existing = textarea.value.trim();
+        textarea.value = existing ? existing + '\n\n' + ocrExtractedText : ocrExtractedText;
+        textarea.focus();
+    }
+
+    // Limpiar OCR
+    function clearOcr() {
+        ocrExtractedText = '';
+        preview.style.display = 'none';
+        preview.src = '';
+        progressContainer.style.display = 'none';
+        ocrActions.style.display = 'none';
+        fileInput.value = '';
+    }
+</script>
+
+</body>
+</html>
